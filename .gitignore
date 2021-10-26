@@ -4,3 +4,4 @@
 /.lsp/
 /.nrepl-port
 .DS_Store
+/.calva

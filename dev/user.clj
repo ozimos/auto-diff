@@ -27,6 +27,7 @@
   (clerk/show! "notebooks/pagination.clj")
   (clerk/show! "notebooks/how_clerk_works.clj")
   (clerk/show! "notebooks/tablecloth.clj")
+  (clerk/show! "notebooks/auto_diff.clj")
 
   (clerk/show! "notebooks/viewers/html.clj")
   (clerk/show! "notebooks/viewers/markdown.clj")
@@ -41,4 +42,8 @@
   (clerk/build-static-app! {:paths (concat
                                     ["notebooks/rule_30.clj"]
                                     (map #(str "notebooks/viewers/" % ".clj") '[html markdown plotly tex vega]))})
+
+
+  (browse/browse-url (str "http://localhost:" port))
+
   )
