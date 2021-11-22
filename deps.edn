@@ -1,0 +1,4 @@
+{:paths ["dev" "resources" "notebooks"]
+ :deps {io.github.nextjournal/clerk {:mvn/version "0.2.214"}
+        sicmutils/sicmutils {:mvn/version "0.19.2"}
+        aerial.hanami/aerial.hanami {:mvn/version "0.12.9"}}}
