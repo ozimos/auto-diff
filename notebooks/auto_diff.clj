@@ -1,12 +1,15 @@
 (ns auto-diff
-  (:require [nextjournal.clerk :as clerk]
-            [clojure.java.io :as io]
-            [sicmutils.env :as env
+  (:require [sicmutils.env
+             :as env
              :refer [D cube square sin cos ->TeX ->infix simplify]]
+            [sicmutils.differential :as d]
+            [nextjournal.clerk :as clerk]
             [aerial.hanami.common :as hc]
-            [aerial.hanami.templates :as ht]))
+            [aerial.hanami.templates :as ht]
+            [vega-plot-setup :refer [ptselect slope-rule]]
+            [clojure.java.io :as io])
+  (:import java.util.concurrent.Future))
 
-(require '[vega-plot-setup :refer [ptselect slope-rule]])
 
 ;; ### Introduction
 
@@ -59,11 +62,13 @@
 
 ;; Math equations can be represented as Clojure functions
 
-;; We can write out the equation using the sicmutils library
+
+
 
 (defn height [t v_0 g]
   (env/- (env/* t v_0)
-         (env// (env/* g (square t))  2)))
+         (env// (env/* g (square t))
+                2)))
 
 
 ;; you'll notice the SICMUtils library has its own versions of many clojure core functions
@@ -74,17 +79,22 @@
 
 (defn height-core [t v_0 g]
   (- (* t v_0)
-     (/ (* g (square t))  2)))
+     (/ (* g (square t))
+        2)))
 
 ;; these work
-(height 0.2 20 10)
+(height 2 20 10)
 
-(height-core 0.2  20 10)
+(height-core 2 20 10)
+
+
+(height 't 'v_0 'g)
 
 
 ;; we can't pass in clojure symbols. this will blow up
 
-  ;; (height-core 't 'v_0 'g)
+;; (height-core 't 'v_0 'g)
+
 
 ;; ### How to view your Clojure functions as Math Equations
 
@@ -104,21 +114,17 @@
 ;; render with sicmutils only
 (defn render [x] (-> x simplify ->infix))
 
+(render (height 't 'v_0 'g))
+
+
 ;; or render with clerk notebook
 
 (defn render-clerk [x] (-> x ->TeX clerk/tex))
 
+(render-clerk (height 't 'v_0 'g))
+
 (defn s-render-clerk [x]
   (-> x simplify render-clerk))
-
-
-;; let's try out our render functions
-(render (square (sin (env/+ 'a 3))))
-(render-clerk (square (sin (env/+ 'a 3))))
-
-
-(render-clerk (env/+ (square (sin 'x))
-                     (square (cos 'x))))
 
 
 ;; we can get the math notation for any function by calling the function
@@ -159,46 +165,147 @@
 
 ;; we'll set acceleration due to gravity to 9.81
 
-(def gr 9.81)
-
-(defn height_time [t]
-  (env/- (env/* t 40) (env// (env/* gr (square t)) 2)))
+(def g 9.81)
 
 
-(height_time 0.1)
+(defn height-time [t]
+  (env/- (env/* t 40)
+         (env// (env/* 9.81 (square t)) 2)))
+
+
+(height-time 1)
+
+(height 1 40 9.81)
 
 ;; Let's plot a graph of projectile height against time
 
 (defn round-to-2dp [r]
   (/ (Math/round (* r 100.0)) 100.0))
 
-(def time-values (mapv round-to-2dp (range 0 8.4 0.2)))
+(def time-vals (mapv round-to-2dp (range 0 8.4 0.2)))
 
-(def height-vals (map (comp round-to-2dp height_time) time-values))
+(def height-vals (map (comp round-to-2dp height-time) time-vals))
+
+
+(def height-plot-data (map (fn [t h] {:time t :height h}) time-vals height-vals))
+
+
+(def height-plot (hc/xform ht/line-chart
+                           :DATA height-plot-data
+                           :WIDTH 700
+                           :X :time
+                           :Y :height))
+
+(clerk/vl height-plot)
+
+
+;; ### Rate of Change and Derivatives
+
+;; Looking at this graph we might have some questions
+
+;; - How fast is the ball travelling at some point in time
+
+;; - By how much is the height changing at some point in time
+
+;; - What is the acceleration on the ball at some point in time
+
+;; ### Calculating the approximate slope of a curved line function
+
+
+
+(def first-height (height-time 2))
+(def second-height (height-time 2.1))
+
+(def slope (/ (- second-height first-height) 0.1))
+
+
+(defn slope-at
+  "Estimate the slope of the function f 
+   at the point x
+  using accuracy delt"
+  [f delt x]
+  (/ (- (f (+ x delt))
+        (f (- x delt)))
+     (* 2 delt)))
+
+
+(slope-at height-time 0.05 1)
+
+(slope-at height-time 0.05 3)
+
+(slope-at height-time 0.05 5)
+
+(slope-at height-time 0.05 7)
+
+;; the slope-at fn tells us how quickly a fn is changing at a specific input value
+
+;; but this method has some shortcomings
+
+;; the slope-at function is an approximation, 
+
+;; cannot give us the actual change because we always add a small delta
+
+;; for every time t there exists a height and also a rate at which the height is changing
+
+;; this means there is a function from time to rate of height change (velocity)
+
+;; what if we could somehow transform our height function to produce the velocity function
+
+;; we could rewrite the slope-at function be a function of time only
+
+
+(defn approx-diff
+  "Generate a function that calculates
+   the slope of the function f 
+   at the point x
+  using accuracy delt"
+  [f delt]
+  (fn [x]
+    (/ (- (f (+ x delt))
+          (f (- x delt)))
+       (* 2 delt))))
+
+(def approx-velocity (approx-diff height-time 0.05))
 
 ;; ### The SICMUtils D Operator
 
 ;; The D operator from SICMUtils maps from function to function
 
-;; converts the height_time function into another function 
+;; converts the height-time function into another function 
 
 ;; that tells us how fast the height is changing
 
-;; we will revisit what the D operator does in detail later
-
 ;; The projectile velocity is the derivative of its height
 
-(def velocity (D height_time))
+(def velocity (D height-time))
 
-;; similarly the acceleration is the derivative of velocity
+(env/kind velocity)
+
+(def compare-D-operators (map (juxt identity
+                                    #(slope-at height-time 0.05 %)
+                                    (approx-diff height-time 0.05)
+                                    (D height-time)) [1 3 5 7]))
+
+(clerk/table (concat [["time" "slope-at" "approx-velocity" "velocity"]] compare-D-operators))
+
+
+;; The derivative of a function y is another function z 
+
+;; that tells us how much the output of function y changes for small changes in the input to y
+
+;; This process of obtaining a derivative from a function is called differentiation
+
+
+
+;;  acceleration is the derivative of velocity
 
 (def acceleration (D velocity))
 
-(def velocity-vals (map (comp round-to-2dp velocity) time-values))
+(def velocity-vals (map (comp round-to-2dp velocity) time-vals))
 
-(def acceleration-vals (map (comp round-to-2dp acceleration) time-values))
+(def acceleration-vals (map (comp round-to-2dp acceleration) time-vals))
 
-(defn line 
+(defn line
   "Given the x-axis value x, slope s and y-axis intercept b
    return y-axis value"
   [x s b] (round-to-2dp (+ (* s x) b)))
@@ -210,11 +317,10 @@
                             b  (- y (* z x))
                             y1  (line x1 z b)
                             y2 (line x2 z b)]
-                        {:time x :x1 x1 :x2 x2 :height y :y1 y1 :y2 y2 :velocity z :acceleration a})) 
-                    time-values height-vals velocity-vals acceleration-vals))
+                        {:time x :x1 x1 :x2 x2 :height y :y1 y1 :y2 y2 :velocity z :acceleration a}))
+                    time-vals height-vals velocity-vals acceleration-vals))
 
-;; projectile graph with dynamic slope
-(hc/xform ptselect)
+;; projectile graph with dynamic slope line
 (def slope-plot
   (hc/xform  (assoc ht/layer-chart
                     :encoding {:x {:field :time :type "quantitative"}})
@@ -244,7 +350,7 @@
                                      :axis {:titleColor "lime"
                                             :titleBaseline "bottom"
                                             :titleY 550
-                                            :values [(- gr)]
+                                            :values [(- g)]
                                             :labelColor "lime"
                                             :tickColor "lime"}}}}
 
@@ -259,145 +365,98 @@
 
 (clerk/vl slope-plot)
 
-;; ### Rate of Change and Derivatives
 
-;; Looking at this graph we might have some questions
+;; ### Maximum Height
 
-;; - How fast is the ball travelling at some point in time
-
-;; - By how much is the height changing at some point in time
-
-;; - What is the acceleration on the ball at some point in time
-
-;; ### Calculating the slope of a function
-
-;; let's assign some values to some of our height function arguments
+;; One application of derivatives is to find the maxima or minima of a function,
+;; points along the function's curve where the output of the function's derivative = 0
 
 
-(def first-val (height 2 40 gr))
-(def second-val (height 2.1 40 gr))
-
-(def slope (/ (- second-val first-val) 0.1))
+(s-render-clerk (velocity 't))
 
 
-(defn slope-at
-  "Estimate the slope of the function f at the point x
-  using accuracy delt"
-  [f delt x & args]
-  (/ (- (apply f (cons (+ x delt) args)) (apply f (cons (- x delt) args))) (* 2 delt)))
+;; The height curve peaks between 4 and 4.5 
 
-;; with our initial height function that takes mutiple parameters
-(slope-at height 0.05 2 40 gr)
+;; At the very peak, the slope of the curve is zero
 
-(slope-at height_time 0.05 2)
+;; For a small change in time (the input) we have zero change in height-time
 
-;; the slope-at fn tells us how quickly a fn is changing at a specific input value
 
-;; but this method has some shortcomings
+(str (render (velocity 't)) " = 0")
 
-;; the slope-at function is an approximation, 
 
-;; cannot give us the actual change because we always add a small delta
+;; $$ t = 40 / 9.81$$
 
-;; for every time t there exists a height and also a rate at which the height is changing
+;; t solves to 4.077
 
-;; this means there is a function from time to rate of height change (velocity)
+(def t-max (/ 40 9.81))
 
-;; what if we could somehow transform our height function to produce the velocity function
 
-;; This process of doing this is called differentiation
+(velocity t-max)
 
-;; and our transformed function (velocity) is called the derivative of the height function
+;; maximum height
+(def h-max (height-time t-max))
 
-;; let us try the D operator from SICMUtils
-
-((D height_time) 2)
-
-(env/kind (D height_time))
 
 ;; ### Differentiation
 
-;; a derivative of some fn f is another fn g that tells us the following about f
+;; The derivative of some function f is a function g taking the same inputs as f and with an output that equals
+;; the rate of change of f's output compared to f's inputs
 
-;; For a small change in the function inputs how much does the output change
-
-;; The rate of change of the output compared to the inputs
+;; For a small change in the function f inputs how much does f's output change
 
 ;; Sensitivity of a function value wrt change in its argument
 
 ;; How much the function output wobbles if we perturb the function input
 
-;; The process of transforms a function into its derivative is called differentiation
+;; The process of obtaining the derivative from a function is called differentiation
 
 
-;; ### Introductory Calculus formulas for Differentiation
+(clerk/tex "\\begin{align*}
+            {\\frac {d(af+bg)}{dx}}=a{\\frac {df}{dx}}+b{\\frac {dg}{dx}} & \\qquad {\\frac {d(x^r)}{dx}}=rx^{r-1} \\quad for \\space any \\space real \\space number \\space r\\neq 0  \\\\
+            {\\frac {d}{dx}}h(x)={\\frac {d}{dz}}f(z)|_{z=g(x)}\\cdot {\\frac {d}{dx}}g(x) & \\qquad (f^{g})'=\\left(e^{g\\ln f}\\right)'=f^{g}\\left(f'{g \\over f}+g'\\ln f\\right) \\\\
+            {\\frac {d(fg)}{dx}}={\\frac {df}{dx}}g+f{\\frac {dg}{dx}} & \\qquad  \\left({\\frac {f}{g}}\\right)'={\\frac {f'g-g'f}{g^{2}}}\\quad whenever \\space g \\space is \\space nonzero \\\\
+            (\\sin x)'=\\cos x={\\frac {e^{ix}+e^{-ix}}{2}} & \\qquad (\\cos x)'=-\\sin x={\\frac {e^{-ix}-e^{ix}}{2i}}  \\\\
+            (\\tan x)'=\\sec ^{2}x={1 \\over \\cos ^{2}x}=1+\\tan ^{2}x
+             \\end{align*}")
 
-(def texrender (comp env/->tex-equation ->infix simplify))
+(defn sample-fn [x] (env/+ (cube x) (env/* 2 (square x)) 1))
 
-(defn show-f-and-f' [f]
-  (str "\\text{The derivative of }"
-       (texrender (f 'x))
-       "\\text{  is  }"
-       (texrender ((D f) 'x))
-       "\\text{.}"))
-
-(clerk/tex (show-f-and-f' square)) 
-(clerk/tex (show-f-and-f' cube)) 
-(clerk/tex (show-f-and-f' (fn [x] (env/+ (cube x) (env/* 2 (square x)) 1))))
-
-;; ### Derivative of Height using the D Operator
-
-;; (def velocity (D height_time))
-
-(velocity 5)
-
-
-(env/kind velocity)
-
-;; When rendered
-
-(s-render-clerk (velocity 'x))
-
-;; What is the rate at which the height_time is changing (i.e. the velocity) when time is 4
-
-(velocity 4)
-
-
-;; The velocity at time 4 is 33
-
-;; ### Maximum Height
-
-;; one application of derivatives is to find the maxima or minima of a function,
-;; points along the curve where the derivative = 0
-
-
-;; The D operator provides slope of the graph
-((D height_time) 0.2)
-
-((D height_time) 1.5)
-((D height_time) 4.5)
-
-;; we can see the graph peaking. At this point the derivative is zero
-;; for a small change in time (the input) we have zero change in height_time
-
-
-(str (render (velocity 't)) " = 0")
-
-;; t solves to 4.077
-
-((D height_time) 4.077)
+(clerk/table (map (fn [f] {:fn (render (f 'x))
+                           :derivative (render ((D f) 'x))})
+                  [identity square cube sin cos env/tan env/log env/exp sample-fn height-time]))
 
 
 
- ;; What is automatic differentiation
+;; ### Automatic differentiation
 
 ;; Allows for the computation of derivative of any computer program
+
+;; For example SICMUtils can be taught to differentiate a java Future
+
+
+(extend-protocol d/IPerturbed
+  Future
+  (perturbed? [t] (d/perturbed? @t))
+  (replace-tag [t old new] (d/replace-tag @t old new))
+  (extract-tangent [t tag] (future (d/extract-tangent @t tag))))
+
+(defn f-cubed [t]
+  (future (Thread/sleep 1000) (cube t)))
+
+(def diff (D f-cubed))
+
+@(f-cubed 2) ;; => 8
+
+@(diff 3) ;; => 27
+
+@(diff 'x) ;; => (+ (* x x) (* x (+ x x)))
 
 ;; other computational approaches include numeric approximation or symbolic differentiation
 
 ;; symbolic differentiation is basically the approach taught in high school
 
-;; SICMUtils uses foward mode automatic differentiation
+;; SICMUtils uses forward mode automatic differentiation
 
 ;; every value in the expression to be differentiated is represented as a dual
 
@@ -409,7 +468,15 @@
 
 ;; The D operator then evaluates the expression
 
-;; As the D operator evaluates the expression, it throw away ε values with exponent greater than 1
+;; As the D operator evaluates the expression, derivatives attached to ε with exponent greater than 1 are discarded
+
+;; $$ε^2$$
+
+;; not an entirely accurate analogy but think of ε as a very small number
+
+;; the value for higher exponents of ε become ever smaller
+
+[0.001 (* 0.001 0.001) (* 0.001 0.001 0.001) (* 0.001 0.001 0.001 0.001)]
 
 
 (defn test-exp [x] (env/+ (env/* 2 (env/cos (square x))) (env/* 2  x)))
@@ -428,25 +495,19 @@
 
 ;; There are reasons for this but we won't go into details
 
-;; for small numbers at larger powers  the values are so small they don't matter
-
-;; rate of change inside rate of change
-
-[0.01 (* 0.01 0.01) (* 0.01 0.01 0.01) (* 0.01 0.01 0.01 0.01)]
-
 (s-render-clerk (test-exp 'x))
 
 ;; Rules for simple exponents of x, trig functions and constants are built in
 
-;; $$([2 + ε^2] \times [x + ε1]) + ([2 + ε^2] \times [\cos([x^2 + ε2x]) + unknown])$$
+;; $$([2 + ε0] \times [x + ε1]) + ([2 + ε0] \times [\cos([x^2 + ε2x]) + unknown])$$
 
 ;; another internal rule
 
 ;; $$f(x + ε) \approx f(x) + εf^{'}(x)$$
 
-;; $$([2x + ε2 + ...]) + ([2 + ε^2] \times [\cos(x^2) + ε2x(-\sin(x^2))])$$
+;; $$([2x + ε2 + ε0]) + ([2 + ε0] \times [\cos(x^2) + ε2x(-\sin(x^2))])$$
 
-;; $$[2x + ε2] + [2\cos(x^2) - ε4x\sin(x^2) + ...]$$
+;; $$[2x + ε2] + [2\cos(x^2) - ε4x\sin(x^2) + ε0]$$
 
 ;; $$[(2x + 2\cos(x^2)) + ε(2 - 4x\sin(x^2))]$$
 
@@ -476,7 +537,7 @@
 
 (defn projectile [t theta_0]
   (env/- (env/* t 40 (sin theta_0))
-         (env// (env/* gr (square t)) 2)))
+         (env// (env/* g (square t)) 2)))
 
 
 (s-render-clerk (projectile 't 'theta_0))
@@ -498,26 +559,3 @@
                             (mapv #(projectile x %) theta-range))))
 
 (clerk/plotly {:data [{:z projectile-mesh :x time-range :y theta-range :type "surface"}]})
-
-
-(defn dome [x y]
-  (env/- (square x) (square y)))
-
-(s-render-clerk (dome 'x 'y))
-
-;; applications 
-
-;; flow rate, epidemiology, modeling disease spread, 
-
-;; COVID SIR  (Susceptible, Infected, Recovered) Model
-
-;; economics, 
-
-;; optimization and machine learning
-
-
-;; Road Map for the SICMUtils
-
-;; Capabilities
-
-;; Upcoming Features and differences from the original

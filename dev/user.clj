@@ -8,7 +8,7 @@
 
 (webserver/start! {:port port})
 
-(clerk/show! "notebooks/auto_diff.clj")
+;; (clerk/show! "notebooks/auto_diff.clj")
 
 (comment
   ;; Optionally start a file-watcher to automatically refresh notebooks when saved
