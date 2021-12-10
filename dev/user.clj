@@ -1,26 +1,14 @@
-(require
- '[clojure.java.browse :as browse]
- '[nextjournal.clerk.webserver :as webserver]
- '[nextjournal.clerk :as clerk]
- '[nextjournal.beholder :as beholder])
+(ns user
+  (:require [nextjournal.clerk :as clerk]
+            [clojure.string :as str]))
 
-(def port 7777)
+;; set :browse? to true to open a clerk browser tab automatically
+(clerk/serve! {:browse false :port 7777 
+               :watch-paths ["notebooks"]
+               :show-filter-fn #(str/includes? % "auto_diff")})
 
-(webserver/start! {:port port})
-
-;; (clerk/show! "notebooks/auto_diff.clj")
 
 (comment
-  ;; Optionally start a file-watcher to automatically refresh notebooks when saved
-  (def filewatcher
-    (beholder/watch #(clerk/file-event %) "notebooks"))
-
-  (beholder/stop filewatcher)
-
-  ;; or call `clerk/show!` explicitly
   (clerk/show! "notebooks/auto_diff.clj")
-
-
-  (browse/browse-url (str "http://localhost:" port))
 
   )
